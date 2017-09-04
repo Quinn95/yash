@@ -24,6 +24,9 @@ void tokenizer(char* input, char** array, size_t* size){
         (*size)++;
         tk = strtok(NULL, " ");
     }
+    if (*size < 2000){
+        array[(*size)] = NULL;
+    }
 }
 
 
@@ -40,6 +43,7 @@ size_t tokenSize = 0;
 pid_t cpid;
 int main(int argc, char * argv[]){
     while (1){
+        tokenSize = 0;
         printf("%s", "# ");
         //scanf("%s", instr);
         fgets(instr, 2000, stdin);
@@ -50,23 +54,13 @@ int main(int argc, char * argv[]){
         tokenizer(instr, tokens, &tokenSize);
         strcpy(execute, path);
         strcat(execute, tokens[0]);
-        /*
-        strcpy(execute, path);
-        strcat(execute, token);
-        token = strtok(NULL, " ");
-        strcpy(args, "");
-        while(token != NULL){
-            printf("%s\n", token);
-            strcat(args, token);
-            token = strtok(NULL, " ");
-        }
-        */
+
 
         cpid = fork();
         if (cpid == 0){ 
             //printf("Hi");
             //if (execl(execute, "") == -1){
-            if (execl(execute, "") == -1){
+            if (execv(execute, tokens) == -1){
                 printf("Error\n");
             }
             exit(0);
