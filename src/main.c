@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include <malloc.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include <fcntl.h>
 //https://stackoverflow.com/questions/4204915/please-explain-exec-function-and-its-family
 //https://unix.stackexchange.com/questions/149741/why-is-sigint-not-propagated-to-child-process-when-sent-to-its-parent-process
@@ -54,7 +55,7 @@ void tokenizer(char* input, char** array, size_t* size){
             tk = strtok(NULL, " ");
             outfile = open(tk, O_RDONLY);
             dup2(outfile, 0);
-            close(outfile);
+//            close(outfile);
         }
 
         else{
