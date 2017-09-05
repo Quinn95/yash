@@ -13,6 +13,7 @@
 //https://stackoverflow.com/questions/4204915/please-explain-exec-function-and-its-family
 //https://unix.stackexchange.com/questions/149741/why-is-sigint-not-propagated-to-child-process-when-sent-to-its-parent-process
 //https://stackoverflow.com/questions/2605130/redirecting-exec-output-to-a-buffer-or-file
+//https://unix.stackexchange.com/questions/41421/what-is-the-file-descriptor-3-assigned-by-default
 
 
 
@@ -25,31 +26,37 @@ void sigtstp_handler(int signum){
 }
 
 
-typedef enum ParseMode {
-    LEFT,
-    RIGHT,
-    ERROR,
-    PIPE,
-    EXEC
-} ParseMode;
 
 
 
 void tokenizer(char* input, char** array, size_t* size){
-    ParseMode mode = EXEC;
 
 
     char* current;
     char* tk = strtok(input, " ");
     int outfile;
     
+
     while (tk != NULL){
         if (strcmp(tk, ">") == 0){
             tk = strtok(NULL, " ");
-            outfile = open(tk, O_WRONLY | O_APPEND | O_CREAT);
+            outfile = open(tk, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
             dup2(outfile, 1);
             close(outfile);
         }
+        else if (strcmp(tk, "2>") == 0){
+            tk = strtok(NULL, " ");
+            outfile = open(tk, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
+            dup2(outfile, 2);
+            close(outfile);
+        }
+        else if (strcmp(tk, "<") == 0){
+            tk = strtok(NULL, " ");
+            outfile = open(tk, O_RDONLY);
+            dup2(outfile, 0);
+            close(outfile);
+        }
+
         else{
             current = malloc(strlen(tk)*sizeof(char*));
             strcpy(current, tk);
