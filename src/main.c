@@ -9,8 +9,12 @@
 #include <sys/wait.h>
 #include <malloc.h>
 #include <signal.h>
+#include <fcntl.h>
 //https://stackoverflow.com/questions/4204915/please-explain-exec-function-and-its-family
 //https://unix.stackexchange.com/questions/149741/why-is-sigint-not-propagated-to-child-process-when-sent-to-its-parent-process
+//https://stackoverflow.com/questions/2605130/redirecting-exec-output-to-a-buffer-or-file
+
+
 
 void sigint_handler(int signum){
     printf("\n");
@@ -20,16 +24,39 @@ void sigtstp_handler(int signum){
     printf("\n");
 }
 
+
+typedef enum ParseMode {
+    LEFT,
+    RIGHT,
+    ERROR,
+    PIPE,
+    EXEC
+} ParseMode;
+
+
+
 void tokenizer(char* input, char** array, size_t* size){
+    ParseMode mode = EXEC;
+
 
     char* current;
     char* tk = strtok(input, " ");
+    int outfile;
     
     while (tk != NULL){
-        current = malloc(strlen(tk)*sizeof(char*));
-        strcpy(current, tk);
-        array[*size] = current;
-        (*size)++;
+        if (strcmp(tk, ">") == 0){
+            tk = strtok(NULL, " ");
+            outfile = open(tk, O_WRONLY | O_APPEND | O_CREAT);
+            dup2(outfile, 1);
+            close(outfile);
+        }
+        else{
+            current = malloc(strlen(tk)*sizeof(char*));
+            strcpy(current, tk);
+            array[*size] = current;
+            (*size)++;
+        }
+
         tk = strtok(NULL, " ");
     }
     if (*size < 2000){
@@ -46,6 +73,7 @@ char args[2000];
 
 char* tokens[2000];
 size_t tokenSize = 0;
+
 
 pid_t cpid;
 int main(int argc, char * argv[]){
@@ -66,13 +94,12 @@ int main(int argc, char * argv[]){
         if ((strlen(instr) > 0) && (instr[strlen(instr) - 1] == '\n')){
             instr[strlen(instr) - 1] = '\0';
         }
-        tokenizer(instr, tokens, &tokenSize);
-        strcpy(execute, path);
-        strcat(execute, tokens[0]);
-
-
         cpid = fork();
         if (cpid == 0){ 
+            tokenizer(instr, tokens, &tokenSize);
+            strcpy(execute, path);
+            
+            strcat(execute, tokens[0]);
             if (execv(execute, tokens) == -1){
                 printf("Error\n");
             }
@@ -83,6 +110,5 @@ int main(int argc, char * argv[]){
             waitpid(cpid, &status, 0);
         }
     }
-
     return 0;
 }
