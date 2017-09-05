@@ -8,9 +8,17 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <malloc.h>
+#include <signal.h>
 //https://stackoverflow.com/questions/4204915/please-explain-exec-function-and-its-family
 //https://unix.stackexchange.com/questions/149741/why-is-sigint-not-propagated-to-child-process-when-sent-to-its-parent-process
 
+void sigint_handler(int signum){
+    printf("\n");
+}
+
+void sigtstp_handler(int signum){
+    printf("\n");
+}
 
 void tokenizer(char* input, char** array, size_t* size){
 
@@ -30,7 +38,6 @@ void tokenizer(char* input, char** array, size_t* size){
 }
 
 
-//char path[100]; 
 char path[] = "/usr/bin/";
 
 char instr[2000];
@@ -42,7 +49,10 @@ size_t tokenSize = 0;
 
 pid_t cpid;
 int main(int argc, char * argv[]){
-    while (1){
+    signal(SIGINT, sigint_handler); 
+    signal(SIGTSTP, sigtstp_handler);
+
+    while (!feof(stdin)){
         while (tokenSize > 0){
             free(tokens[tokenSize]);
             tokenSize--;
@@ -50,7 +60,9 @@ int main(int argc, char * argv[]){
         
         printf("%s", "# ");
         fgets(instr, 2000, stdin);
-
+        if (feof(stdin)){
+            exit(0);
+        }
         if ((strlen(instr) > 0) && (instr[strlen(instr) - 1] == '\n')){
             instr[strlen(instr) - 1] = '\0';
         }
