@@ -85,6 +85,8 @@ int main(int argc, char * argv[]){
     char* outfile;
     char* infile;
     char* errorfile;
+
+    int fd[2];
  
     while (!feof(stdin)){
         outfile = NULL;
@@ -115,16 +117,20 @@ int main(int argc, char * argv[]){
                 dup2(outfilenum, 1);
                 close(outfilenum);
             }
-            if (infile != NULL){
-                int infilenum = open(infile, O_RDONLY);
-                dup2(infilenum, 0);
-                close(infilenum);
-            }
             if (errorfile != NULL){
                 int errorfilenum = open(errorfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
                 dup2(errorfilenum, 2);
                 close(errorfilenum);
             }
+            if (infile != NULL){
+                int infilenum = open(infile, O_RDONLY);
+                if (infilenum < 0){
+                    _exit(0);
+                }
+                dup2(infilenum, 0);
+                close(infilenum);
+            }
+
             if (execv(execute, tokens) == -1){
                 printf("Error\n");
                 _exit(0);
