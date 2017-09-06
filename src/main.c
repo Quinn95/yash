@@ -31,7 +31,7 @@ void sigtstp_handler(int signum){
 
 
 
-void tokenizer(char* input, char** array, size_t* size, char** outfile, char** infile, char** errorfile){
+void tokenizer(char* input, char** array, size_t* size, char** outfile, char** infile, char** errorfile, int* forkIndex){
     char* current;
     char* tk = strtok(input, " ");
     
@@ -51,6 +51,11 @@ void tokenizer(char* input, char** array, size_t* size, char** outfile, char** i
             tk = strtok(NULL, " ");
             *infile = (char*) malloc(strlen(tk)*sizeof(char*));
             strcpy(*infile, tk);
+        }
+        else if (strcmp(tk, "|") == 0){
+            array[*size] = NULL;
+            *forkIndex = *size;
+            (*size)++;
         }
         else{
             current = (char*) malloc(strlen(tk)*sizeof(char*));
@@ -76,9 +81,10 @@ char args[2000];
 char* tokens[2000];
 size_t tokenSize = 0;
 
-
 pid_t cpid;
-int main(int argc, char * argv[]){
+int main(int argc, char* argv[]){
+    int forkIndex;
+
     signal(SIGINT, sigint_handler); 
     signal(SIGTSTP, sigtstp_handler);
 
@@ -89,6 +95,7 @@ int main(int argc, char * argv[]){
     int fd[2];
  
     while (!feof(stdin)){
+        forkIndex = -1;
         outfile = NULL;
         infile = NULL;
         errorfile = NULL;
@@ -106,7 +113,7 @@ int main(int argc, char * argv[]){
             instr[strlen(instr) - 1] = '\0';
         }
         
-        tokenizer(instr, tokens, &tokenSize, &outfile, &infile, &outfile);
+        tokenizer(instr, tokens, &tokenSize, &outfile, &infile, &outfile, &forkIndex);
         cpid = fork();
         if (cpid == 0){ 
             strcpy(execute, path); 
