@@ -31,21 +31,23 @@ void sigtstp_handler(int signum){
 
 
 
-void tokenizer(char* input, char** array, size_t* size){
-
-
+void tokenizer(char* input, char** array, size_t* size, char** outfile, char** infile){
     char* current;
     char* tk = strtok(input, " ");
-    int outfile;
     
 
     while (tk != NULL){
         if (strcmp(tk, ">") == 0){
             tk = strtok(NULL, " ");
+            *outfile = (char*) malloc(strlen(tk)*sizeof(char*));
+            strcpy(*outfile, tk);
+            /*
             outfile = open(tk, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
             dup2(outfile, 1);
             close(outfile);
+            */
         }
+        /*
         else if (strcmp(tk, "2>") == 0){
             tk = strtok(NULL, " ");
             outfile = open(tk, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
@@ -58,8 +60,9 @@ void tokenizer(char* input, char** array, size_t* size){
             dup2(outfile, 0);
             close(outfile);
         }
+        */
         else{
-            current = malloc(strlen(tk)*sizeof(char*));
+            current = (char*) malloc(strlen(tk)*sizeof(char*));
             strcpy(current, tk);
             array[*size] = current;
             (*size)++;
@@ -88,7 +91,12 @@ int main(int argc, char * argv[]){
     signal(SIGINT, sigint_handler); 
     signal(SIGTSTP, sigtstp_handler);
 
+    char* outfile;
+    char* infile;
+ 
     while (!feof(stdin)){
+        outfile = NULL;
+        infile = NULL;
         while (tokenSize > 0){
             free(tokens[tokenSize]);
             tokenSize--;
@@ -102,16 +110,22 @@ int main(int argc, char * argv[]){
         if ((strlen(instr) > 0) && (instr[strlen(instr) - 1] == '\n')){
             instr[strlen(instr) - 1] = '\0';
         }
+        
+        tokenizer(instr, tokens, &tokenSize, &outfile, &infile);
         cpid = fork();
         if (cpid == 0){ 
-            tokenizer(instr, tokens, &tokenSize);
-            strcpy(execute, path);
-            
+            strcpy(execute, path); 
             strcat(execute, tokens[0]);
+            
+            if (outfile != NULL){
+                int temp = open(outfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
+                dup2(temp, 1);
+                close(temp);
+            }
             if (execv(execute, tokens) == -1){
                 printf("Error\n");
+                _exit(0);
             }
-            exit(0);
         }
         else {
             int status;
