@@ -27,8 +27,73 @@ void sigtstp_handler(int signum){
     printf("\n");
 }
 
+typedef enum Status {
+    STOPPED,
+    RUNNING,
+    DONE
+} pstatus;
+
+char STOPPED_STR[] = "STOPPED",
+     RUNNING_STR[] = "RUNNING",
+     DONE_STR[]    = "DONE";
+char* status_string(pstatus status){
+    switch(status){
+        case STOPPED:
+            return STOPPED_STR;
+        case RUNNING:
+            return RUNNING_STR;
+        case DONE:
+            return DONE_STR;
+        default:
+                return NULL;
+    }
+}
 
 
+//FIFO for process groups. Single processes are treated as a group
+typedef struct job {
+    char* name;
+    int number;
+    pid_t session;
+    pstatus status; 
+    struct job* next;
+} job;
+
+int job_num = 0;
+job* new_job(job* current, char* name, pid_t session){
+    job* ret = (job*) malloc(sizeof(job));     
+    ret->name = strdup(name);
+    ret->session = session;
+    ret->status = RUNNING;
+    ret->next = current;
+
+    if (current == NULL){
+        job_num = 0;
+    }
+    job_num++;
+
+    ret->number = job_num;
+    return ret;
+}
+
+void print_jobs(job* jobs){
+    char* name;
+    int number;
+    char fg;
+    char* status;
+
+    
+    while(jobs != NULL){
+        name = jobs->name;
+        number = jobs->number;
+        fg = '+';
+        status = status_string(jobs->status); 
+        printf("[%i] %c %s %s", number, fg, status, name);
+
+        jobs = jobs->next;
+    }
+
+}
 
 
 void tokenizer(char* input, char** array, size_t* size, char** outfile, char** infile, char** errorfile, int* pipeIndex){
@@ -72,14 +137,13 @@ void tokenizer(char* input, char** array, size_t* size, char** outfile, char** i
 }
 
 
-char path[] = "/usr/bin/";
 
 char instr[2000];
-char execute[2000];
-char args[2000];
 
 char* tokens[2000];
 size_t tokenSize = 0;
+
+job* jobs = NULL;
 
 pid_t cpid;
 pid_t cpid2;
@@ -95,7 +159,7 @@ int main(int argc, char* argv[]){
 
     int fd[2];
  
-    while (!feof(stdin)){
+    while (1){
         pipeIndex = -1;
         outfile = NULL;
         infile = NULL;
@@ -106,88 +170,107 @@ int main(int argc, char* argv[]){
         }
         
         printf("%s", "# ");
-        fgets(instr, 2000, stdin);
-        if (feof(stdin)){
+        fflush(stdout);
+        if (fgets(instr, 2000, stdin) == NULL){
             exit(0);
         }
+        //if (feof(stdin)){
+        //    exit(0);
+       // }
         if ((strlen(instr) > 0) && (instr[strlen(instr) - 1] == '\n')){
             instr[strlen(instr) - 1] = '\0';
         }
         
-        tokenizer(instr, tokens, &tokenSize, &outfile, &infile, &outfile, &pipeIndex);
-        if (pipeIndex > 0){
-            pipe(fd);
-        }
-        cpid = fork();
-        if (cpid == 0){ 
-            strcpy(execute, path); 
-            strcat(execute, tokens[0]);
-            
-            if (outfile != NULL){
-                int outfilenum = open(outfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
-                dup2(outfilenum, 1);
-                close(outfilenum);
-            }
-            if (errorfile != NULL){
-                int errorfilenum = open(errorfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
-                dup2(errorfilenum, 2);
-                close(errorfilenum);
-            }
-            if (infile != NULL){
-                int infilenum = open(infile, O_RDONLY);
-                if (infilenum < 0){
-                    _exit(0);
-                }
-                dup2(infilenum, 0);
-                close(infilenum);
-            }
-            if (pipeIndex > 0){
-                close(fd[0]);
-                dup2(fd[1], 1);
-                close(fd[1]);
-            }
-            if (execv(execute, tokens) == -1){
-                printf("Error\n");
-                _exit(0);
-            }
-        }
-        else {
-            if (pipeIndex > 0){
-                cpid2 = fork();
-                if (cpid2 == 0){
-                    strcpy(execute, path);
-                    strcat(execute, tokens[pipeIndex]);
-                    if (outfile != NULL){
-                        int outfilenum = open(outfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
-                        dup2(outfilenum, 1);
-                        close(outfilenum);
-                    }
-                    if (errorfile != NULL){
-                        int errorfilenum = open(errorfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
-                        dup2(errorfilenum, 2);
-                        close(errorfilenum);
-                    }
-                    if (infile != NULL){
-                        int infilenum = open(infile, O_RDONLY);
-                        if (infilenum < 0){
-                            _exit(0);
-                        }
-                        dup2(infilenum, 0);
-                        close(infilenum);
-                    }
-                    close(fd[1]);
-                    dup2(fd[0], 0); 
-                    close(fd[0]);
-                    if (execv(execute, &tokens[pipeIndex]) == -1){
-                        printf("Error\n");
-                        _exit(0);
-                    }
-                }
-            }
-            close(fd[0]);
-            close(fd[1]);
+        if (strcmp(instr, "fg") == 0){
+            kill(cpid, SIGCONT);
+            //kill(-cpid, SIGCONT);
             int status;
             waitpid(cpid, &status, 0);
+        }
+        else if (strcmp(instr, "jobs") == 0){
+            print_jobs(jobs);
+        }
+        else {
+
+        if (strlen(instr) > 0){
+            tokenizer(instr, tokens, &tokenSize, &outfile, &infile, &errorfile, &pipeIndex);
+            if (pipeIndex > 0){
+                pipe(fd);
+            }
+            cpid = fork();
+            if (cpid == 0){ 
+                
+                if (outfile != NULL){
+                    int outfilenum = open(outfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
+                    dup2(outfilenum, 1);
+                    close(outfilenum);
+                }
+                if (errorfile != NULL){
+                    int errorfilenum = open(errorfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
+                    dup2(errorfilenum, 2);
+                    close(errorfilenum);
+                }
+                if (infile != NULL){
+                    int infilenum = open(infile, O_RDONLY);
+                    if (infilenum < 0){
+                        printf("yash: %s: No such file or directory\n", infile);
+                        fflush(stdout);
+                        _exit(0);
+                    }
+                    dup2(infilenum, 0);
+                    close(infilenum);
+                }
+                if (pipeIndex > 0){
+                    close(fd[0]);
+                    dup2(fd[1], 1);
+                    close(fd[1]);
+                }
+                if (execvp(tokens[0], tokens) == -1){
+                    printf("yash: %s: command not found\n", tokens[0]);
+                    _exit(0);
+                }
+            }
+            else {
+                if (pipeIndex > 0){
+                    cpid2 = fork();
+                    if (cpid2 == 0){
+                        if (outfile != NULL){
+                            int outfilenum = open(outfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
+                            dup2(outfilenum, 1);
+                            close(outfilenum);
+                        }
+                        if (errorfile != NULL){
+                            int errorfilenum = open(errorfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
+                            dup2(errorfilenum, 2);
+                            close(errorfilenum);
+                        }
+                        if (infile != NULL){
+                            int infilenum = open(infile, O_RDONLY);
+                            if (infilenum < 0){
+                                _exit(0);
+                            }
+                            dup2(infilenum, 0);
+                            close(infilenum);
+                        }
+                        close(fd[1]);
+                        dup2(fd[0], 0); 
+                        close(fd[0]);
+                        if (execvp(tokens[pipeIndex], &tokens[pipeIndex]) == -1){
+                            printf("yash: %s: command not found\n", tokens[pipeIndex]);
+                            _exit(0);
+                        }
+                    }
+                    close(fd[0]);
+                    close(fd[1]);
+                    int status;
+                    waitpid(cpid2, &status, 0);
+                }
+                else{
+                    int status;
+                    waitpid(-1, &status, WUNTRACED | WCONTINUED);
+                }
+            }
+        } 
         }
     }
     return 0;
