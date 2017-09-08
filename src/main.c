@@ -5,8 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
-#include <unistd.h>
 #include <sys/types.h>
+#include <unistd.h>
 #include <sys/wait.h>
 #include <string.h>
 #include <malloc.h>
@@ -81,10 +81,11 @@ static void sigint_handler(int signum){
 }
 
 static void sigtstp_handler(int signum){
-//    if (instr[0] != '\0'){
-//        printf("Hi\n");
+    if (instr[0] != '\0'){
+        printf("%i suspended\n", cpid);
+        //jobs = new_job(jobs, instr, cpid);
         kill(-cpid,SIGTSTP);    
-//    }
+    }
 }
 
 
@@ -148,20 +149,44 @@ void tokenizer(char* input, char** array, size_t* size, char** outfile, char** i
     }
 }
 
+char* outfile;
+char* infile;
+char* errorfile;
+
+void fileHelper(){
+    if (outfile != NULL){
+        int outfilenum = open(outfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
+        dup2(outfilenum, 1);
+        close(outfilenum);
+    }
+    if (errorfile != NULL){
+        int errorfilenum = open(errorfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
+        dup2(errorfilenum, 2);
+        close(errorfilenum);
+    }
+    if (infile != NULL){
+        int infilenum = open(infile, O_RDONLY);
+        if (infilenum < 0){
+            printf("yash: %s: No such file or directory\n", infile);
+            fflush(stdout);
+            _exit(0);
+        }
+        dup2(infilenum, 0);
+        close(infilenum);
+    }
+
+}
 
 
 int main(int argc, char* argv[]){
-    int pipeIndex;
+    int pipeIndex = 0;
 
     signal(SIGINT, sigint_handler); 
     signal(SIGTSTP, sigtstp_handler);
 
-    char* outfile;
-    char* infile;
-    char* errorfile;
-
     int fd[2];
  
+    int pid = 0;
     while (1){
         pipeIndex = -1;
         outfile = NULL;
@@ -186,15 +211,17 @@ int main(int argc, char* argv[]){
         }
         
         if (strcmp(instr, "fg") == 0){
-            kill(-cpid, SIGCONT);
-            //kill(-cpid, SIGCONT);
+            printf("cpid: %i\n", cpid);
+            kill(-pid, SIGCONT);
             int status;
-            waitpid(cpid, &status, 0);
+            pause();
+            //waitpid(cpid, &status, 0);
+            //waitpid(-1, &status, WUNTRACED | WCONTINUED);
         }
         else if (strcmp(instr, "jobs") == 0){
             print_jobs(jobs);
         }
-        else {
+        else { //do stuff
             if (strlen(instr) > 0){
                 tokenizer(instr, tokens, &tokenSize, &outfile, &infile, &errorfile, &pipeIndex);
                 if (pipeIndex > 0){
@@ -202,32 +229,12 @@ int main(int argc, char* argv[]){
                 }
                 cpid = fork();
                 if (cpid == 0){ 
-                    //CHILD 1    
-                    setsid(); // new session with group id == cpid
-                    if (outfile != NULL){
-                        int outfilenum = open(outfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
-                        dup2(outfilenum, 1);
-                        close(outfilenum);
-                    }
-                    if (errorfile != NULL){
-                        int errorfilenum = open(errorfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
-                        dup2(errorfilenum, 2);
-                        close(errorfilenum);
-                    }
-                    if (infile != NULL){
-                        int infilenum = open(infile, O_RDONLY);
-                        if (infilenum < 0){
-                            printf("yash: %s: No such file or directory\n", infile);
-                            fflush(stdout);
-                            _exit(0);
-                        }
-                        dup2(infilenum, 0);
-                        close(infilenum);
-                    }
+                    fileHelper();
                     if (pipeIndex > 0){
                         close(fd[0]);
                         dup2(fd[1], 1);
                         close(fd[1]);
+                        setsid(); // new session with group id == cpid
                     }
                     if (execvp(tokens[0], tokens) == -1){
                         printf("yash: %s: command not found\n", tokens[0]);
@@ -240,25 +247,11 @@ int main(int argc, char* argv[]){
                         cpid2 = fork();
                         if (cpid2 == 0){
                             // CHILD 2
-//                            setpgid(0, cpid);
-                            if (outfile != NULL){
-                                int outfilenum = open(outfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
-                                dup2(outfilenum, 1);
-                                close(outfilenum);
-                            }
-                            if (errorfile != NULL){
-                                int errorfilenum = open(errorfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
-                                dup2(errorfilenum, 2);
-                                close(errorfilenum);
-                            }
-                            if (infile != NULL){
-                                int infilenum = open(infile, O_RDONLY);
-                                if (infilenum < 0){
-                                    _exit(0);
-                                }
-                                dup2(infilenum, 0);
-                                close(infilenum);
-                            }
+                            sleep(5);
+                            setpgid(0, cpid);
+                            
+                            fileHelper();
+
                             close(fd[1]);
                             dup2(fd[0], 0); 
                             close(fd[0]);
@@ -270,13 +263,12 @@ int main(int argc, char* argv[]){
                         close(fd[0]);
                         close(fd[1]);
                         int status;
-                        //waitpid(-1, &status, 0); 
-                        //waitpid(cpid2, &status, WUNTRACED | WCONTINUED);
+                        pid = waitpid(-1, &status, WUNTRACED | WCONTINUED);
                     }
                     else{
                         // PARENT
-                        int status;
-                        int pid = waitpid(-1, &status,WUNTRACED | WCONTINUED);
+                        int status = 0;
+                        pid = waitpid(-1, &status, WUNTRACED | WCONTINUED);
                     }
                 }
             } 
