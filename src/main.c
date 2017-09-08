@@ -83,7 +83,7 @@ static void sigint_handler(int signum){
 static void sigtstp_handler(int signum){
     if (instr[0] != '\0'){
         printf("%i suspended\n", cpid);
-        //jobs = new_job(jobs, instr, cpid);
+        jobs = new_job(jobs, instr, cpid);
         kill(-cpid,SIGTSTP);    
     }
 }
@@ -212,7 +212,8 @@ int main(int argc, char* argv[]){
         
         if (strcmp(instr, "fg") == 0){
             printf("cpid: %i\n", cpid);
-            kill(-pid, SIGCONT);
+            kill(cpid, SIGCONT);
+            kill(cpid2, SIGCONT);
             int status;
             pause();
             //waitpid(cpid, &status, 0);
@@ -229,6 +230,7 @@ int main(int argc, char* argv[]){
                 }
                 cpid = fork();
                 if (cpid == 0){ 
+                    //child 1
                     fileHelper();
                     if (pipeIndex > 0){
                         close(fd[0]);
@@ -247,7 +249,6 @@ int main(int argc, char* argv[]){
                         cpid2 = fork();
                         if (cpid2 == 0){
                             // CHILD 2
-                            sleep(5);
                             setpgid(0, cpid);
                             
                             fileHelper();
@@ -269,6 +270,7 @@ int main(int argc, char* argv[]){
                         // PARENT
                         int status = 0;
                         pid = waitpid(-1, &status, WUNTRACED | WCONTINUED);
+                        sleep(4);
                     }
                 }
             } 
