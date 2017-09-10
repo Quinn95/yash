@@ -125,8 +125,9 @@ job* remove_job(job* current, pid_t id){
         return NULL;
     }
     if (current->group == id){
+        job* next = current->next;
         free(current);
-        return NULL;
+        return next;
     }
     job* head = current;
     job* prev;
@@ -140,6 +141,20 @@ job* remove_job(job* current, pid_t id){
         current = current->next;
     }
     return head;
+}
+
+job* reap_processes(job* current){
+    job* ret = current;
+    int status;
+    while (current != NULL){
+        if (waitpid(- current->group, &status, WNOHANG) > 0){
+            printf("[%i] %c Done %s\n", current->number, (current->number == job_num)?'+':'-', current->name);
+            ret = remove_job(ret, current->group);
+        }
+        current = current->next;
+    }
+
+    return ret;
 }
 
 void print_jobs(job* jobs){
@@ -222,6 +237,7 @@ char* infile;
 char* errorfile;
 void fileHelper(){
     if (outfile != NULL){
+        printf("%s", outfile);
         int outfilenum = open(outfile, O_WRONLY | O_APPEND | O_CREAT, S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
         dup2(outfilenum, 1);
         close(outfilenum);
@@ -277,6 +293,8 @@ int main(int argc, char* argv[]){
             instr[strlen(instr) - 1] = '\0';
         }
         
+        jobs = reap_processes(jobs);
+
         strcpy(instr_cpy, instr);
         if (strcmp(instr, "fg") == 0){
             job* toFg = get_foreground(jobs);
@@ -289,10 +307,15 @@ int main(int argc, char* argv[]){
                     waitpid(-cpid, &status, WUNTRACED);
                 }
                 tcsetpgrp(STDIN_FILENO, getpgid(0));
-                if (WIFSTOPPED(status)){
-                    toFg->status = STOPPED;
+                if (WIFEXITED(status)){
+                    jobs = remove_job(jobs, toFg->group);
                 }
-                printf("\n");
+                else if (WIFSTOPPED(status)){
+                    toFg->status = STOPPED;
+                    printf("\n");
+                } else{
+                    jobs = remove_job(jobs, toFg->group);
+                }
             }
         }
         else if (strcmp(instr, "jobs") == 0){
@@ -375,21 +398,22 @@ int main(int argc, char* argv[]){
                     else{
                         // PARENT
                         setpgid(cpid, cpid);
+                        jobs = new_job(jobs, instr_cpy, cpid, 1, RUNNING);
                         if (background == false){
                             tcsetpgrp(STDIN_FILENO, cpid);
                             int status = 0;
                             pid = waitpid(-cpid, &status, WUNTRACED | WCONTINUED);
                             tcsetpgrp(STDIN_FILENO, getpgid(0));
                             if (WIFEXITED(status)){
-
+                                jobs = remove_job(jobs, cpid);
                             }
                             else if (WIFSTOPPED(status)){
-                                jobs = new_job(jobs, instr_cpy, cpid, 1, STOPPED);
-                            printf("\n");
+                                job* temp = get_foreground(jobs);
+                                temp->status = STOPPED;
+                                printf("\n");
+                            } else{
+                                jobs = remove_job(jobs, cpid);
                             }
-                        }
-                        else{
-                            jobs = new_job(jobs, instr_cpy, cpid, 1, RUNNING);
                         }
                     }
                 }
