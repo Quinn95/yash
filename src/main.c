@@ -12,6 +12,7 @@
 #include <malloc.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <errno.h>
 //https://stackoverflow.com/questions/4204915/please-explain-exec-function-and-its-family
 //https://unix.stackexchange.com/questions/149741/why-is-sigint-not-propagated-to-child-process-when-sent-to-its-parent-process
 //https://stackoverflow.com/questions/2605130/redirecting-exec-output-to-a-buffer-or-file
@@ -67,9 +68,16 @@ job* new_job(job* current, char* name, pid_t session){
     return ret;
 }
 
+job* remove_job(job* current){
+    job* ret = current->next;
+    free(current);
+    return ret;
+}
+
 
 
 char instr[2000];
+char instr_cpy[2000];
 char* tokens[2000];
 size_t tokenSize = 0;
 job* jobs = NULL;
@@ -81,13 +89,18 @@ static void sigint_handler(int signum){
 }
 
 static void sigtstp_handler(int signum){
+    //printf("Hi\n");
     if (instr[0] != '\0'){
-        printf("%i suspended\n", cpid);
+        //printf("%i suspended\n", cpid);
         jobs = new_job(jobs, instr, cpid);
         kill(-cpid,SIGTSTP);    
+        tcsetpgrp(STDIN_FILENO, getpgid(0));
     }
 }
 
+static void sigchld_handler(int signum){
+    printf("sigchld\n");
+}
 
 void print_jobs(job* jobs){
     char* name;
@@ -182,7 +195,9 @@ int main(int argc, char* argv[]){
     int pipeIndex = 0;
 
     signal(SIGINT, sigint_handler); 
-    signal(SIGTSTP, sigtstp_handler);
+    //signal(SIGTSTP, sigtstp_handler);
+    signal(SIGTTOU, SIG_IGN);
+//    signal(SIGCHLD, sigchld_handler);
 
     int fd[2];
  
@@ -210,14 +225,20 @@ int main(int argc, char* argv[]){
             instr[strlen(instr) - 1] = '\0';
         }
         
+        strcpy(instr_cpy, instr);
         if (strcmp(instr, "fg") == 0){
-            printf("cpid: %i\n", cpid);
-            kill(cpid, SIGCONT);
-            kill(cpid2, SIGCONT);
+            printf("%s\n", jobs->name);
+            tcsetpgrp(STDIN_FILENO, cpid);
+            kill(-cpid, SIGCONT);
+            //kill(cpid2, SIGCONT);
             int status;
-            pause();
-            //waitpid(cpid, &status, 0);
-            //waitpid(-1, &status, WUNTRACED | WCONTINUED);
+            waitpid(-cpid, &status, WUNTRACED);
+            waitpid(-cpid, &status, WUNTRACED);
+            tcsetpgrp(STDIN_FILENO, getpgid(0));
+            if (WIFSTOPPED(status)){
+                printf("ctrl-z\n");
+            }
+             //waitpid(cpid, &status, 0);
         }
         else if (strcmp(instr, "jobs") == 0){
             print_jobs(jobs);
@@ -231,12 +252,13 @@ int main(int argc, char* argv[]){
                 cpid = fork();
                 if (cpid == 0){ 
                     //child 1
+                    //setsid(); // new session with group id == cpid
+                    setpgid(0, 0);
                     fileHelper();
                     if (pipeIndex > 0){
                         close(fd[0]);
                         dup2(fd[1], 1);
                         close(fd[1]);
-                        setsid(); // new session with group id == cpid
                     }
                     if (execvp(tokens[0], tokens) == -1){
                         printf("yash: %s: command not found\n", tokens[0]);
@@ -249,8 +271,45 @@ int main(int argc, char* argv[]){
                         cpid2 = fork();
                         if (cpid2 == 0){
                             // CHILD 2
-                            setpgid(0, cpid);
-                            
+                            //printf("cpg: %i -- cpid: %i -- getpgid:%i\n", getsid(cpid), cpid, getpgid(0));
+                            int errori;
+                            errori = setpgid(0, cpid);
+                            if (errori == -1){
+                                int errsv = errno;
+                                if (errsv == EINVAL){
+                                    printf("einval");
+                                }
+                                if (errsv == EACCES){
+                                    printf("eacces\n");
+                                }
+                                if (errsv == ENOSYS){
+                                    printf("enosys\n");
+                                }
+                                if (errsv == EPERM){
+                                    printf("eperm\n");
+                                }
+                            }
+                            //printf("cpg: %i -- cpid: %i -- getpgid:%i\n", getsid(cpid), cpid, getpgid(0));
+                            /*
+                            if (errori != 0){
+                                if (EACCESS(errori)){
+                                    print("eaccess\n");
+                                }
+                                else if (EINVAL(errori)){
+                                    printf("einval\n");
+                                }
+                                else if (ENOSYS(errori)){
+                                    printf("enosys\n");
+                                }
+                                else if (EPERM(errori)){
+                                    printf("eperm\n");
+                                }
+                                else if (ESRCH(errori)){
+                                    printf("esrch\n");
+                                }
+                                printf("setpgid error %i\n", errori);
+                            }
+                            */ 
                             fileHelper();
 
                             close(fd[1]);
@@ -264,13 +323,32 @@ int main(int argc, char* argv[]){
                         close(fd[0]);
                         close(fd[1]);
                         int status;
-                        pid = waitpid(-1, &status, WUNTRACED | WCONTINUED);
+//                        printf("%i - %i - %i\n", getpid(), cpid, cpid2);
+//                        fflush(stdout);
+                        setpgid(cpid, cpid);
+                        setpgid(cpid2, cpid);
+                        jobs = new_job(jobs, instr_cpy, cpid);
+                        tcsetpgrp(STDIN_FILENO, cpid);
+                        pid = waitpid(- jobs->session, &status, WUNTRACED | WCONTINUED);
+                        pid = waitpid(- jobs->session, &status, WUNTRACED | WCONTINUED);
+                        tcsetpgrp(STDIN_FILENO, getpgid(0));
+                        if (WIFSTOPPED(status)){
+                            printf("\nKilled: %s\n", jobs->name);
+                        }
                     }
                     else{
                         // PARENT
+                        setpgid(cpid, cpid);
+                        tcsetpgrp(STDIN_FILENO, cpid);
                         int status = 0;
-                        pid = waitpid(-1, &status, WUNTRACED | WCONTINUED);
-                        sleep(4);
+                        //pid = waitpid(cpid, &status, WUNTRACED | WCONTINUED);
+//                        printf("%i - %i - %i\n", getpid(), cpid, getpgid(cpid));
+                        pid = waitpid(-cpid, &status, WUNTRACED | WCONTINUED);
+
+                        tcsetpgrp(STDIN_FILENO, getpgid(0));
+                        if (WIFSTOPPED(status)){
+                            printf("ctrl-z\n");
+                        }
                     }
                 }
             } 
