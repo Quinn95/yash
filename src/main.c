@@ -21,15 +21,19 @@
 //https://stackoverflow.com/questions/17630247/coding-multiple-pipe-in-c
 
 
+typedef int bool;
+#define true 1
+#define false 0
+
 typedef enum Status {
     STOPPED,
     RUNNING,
     DONE
 } pstatus;
 
-char STOPPED_STR[] = "STOPPED",
-     RUNNING_STR[] = "RUNNING",
-     DONE_STR[]    = "DONE";
+char STOPPED_STR[] = "Stopped",
+     RUNNING_STR[] = "Running",
+     DONE_STR[]    = "Done";
 char* status_string(pstatus status){
     switch(status){
         case STOPPED:
@@ -46,29 +50,86 @@ char* status_string(pstatus status){
 typedef struct job {
     char* name;
     int number;
-    pid_t session;
+    pid_t group;
     pstatus status; 
+    int processCount;
     struct job* next;
 } job;
 
 int job_num = 0;
-job* new_job(job* current, char* name, pid_t session){
-    job* ret = (job*) malloc(sizeof(job));     
-    ret->name = strdup(name);
-    ret->session = session;
-    ret->status = RUNNING;
-    ret->next = current;
+job* new_job(job* current, char* name, pid_t group, int processCount){
+    job* new = (job*) malloc(sizeof(job));     
+    new->name = strdup(name);
+    new->group = group;
+    new->status = STOPPED;
+    new->processCount = processCount;
+    new->next = NULL;
 
     if (current == NULL){
         job_num = 0;
     }
     job_num++;
 
-    ret->number = job_num;
-    return ret;
+    if (current != NULL){
+        job* temp = current;
+        while (temp->next != NULL){
+            temp = temp->next;
+        }
+        temp->next = new;
+    }
+    else {
+        current = new;
+    }
+    
+
+    new->number = job_num;
+    return current;
 }
 
-job* remove_job(job* current){
+job* get_foreground(job* current){
+    if (current == NULL)
+        return NULL;
+    
+    while (current->next != NULL){
+        current = current->next;
+    }
+    return current;
+}
+
+
+typedef struct maybeJob {
+    job* value;
+    bool exists;
+} maybeJob;
+
+maybeJob get_background(job* current){
+    if (current == NULL){
+        maybeJob maybe;
+        maybe.value = NULL;
+        maybe.exists = false;
+        return maybe;
+    }
+    bool exists = false;
+    job* ret;
+    while (current != NULL){
+        if (current->status == STOPPED){
+            exists = true;
+            ret = current;
+        }
+        else {
+            if (exists == false){
+                ret = current;
+            }
+        }
+        current = current->next;
+    }
+    maybeJob maybe;
+    maybe.value = ret;
+    maybe.exists = exists;
+    return maybe;
+}
+
+job* remove_job(job* current, pid_t id){
     job* ret = current->next;
     free(current);
     return ret;
@@ -85,9 +146,9 @@ pid_t cpid;
 pid_t cpid2;
 
 static void sigint_handler(int signum){
-    kill(-cpid,SIGINT);
 }
 
+/*
 static void sigtstp_handler(int signum){
     //printf("Hi\n");
     if (instr[0] != '\0'){
@@ -96,6 +157,10 @@ static void sigtstp_handler(int signum){
         kill(-cpid,SIGTSTP);    
         tcsetpgrp(STDIN_FILENO, getpgid(0));
     }
+}
+*/
+
+static void sigtstp_handler(int signum){
 }
 
 static void sigchld_handler(int signum){
@@ -112,7 +177,8 @@ void print_jobs(job* jobs){
     while(jobs != NULL){
         name = jobs->name;
         number = jobs->number;
-        fg = '+';
+        fg = (number == job_num)?'+':'-';
+        //fg = '+';
         status = status_string(jobs->status); 
         printf("[%i] %c %s %s\n", number, fg, status, name);
 
@@ -122,6 +188,7 @@ void print_jobs(job* jobs){
 }
 
 
+bool background;
 void tokenizer(char* input, char** array, size_t* size, char** outfile, char** infile, char** errorfile, int* pipeIndex){
     char* current;
     char* tk = strtok(input, " ");
@@ -148,6 +215,9 @@ void tokenizer(char* input, char** array, size_t* size, char** outfile, char** i
             *pipeIndex = *size + 1;
             (*size)++;
         }
+        else if (strcmp(tk, "&") == 0){
+            background = true;
+        }
         else{
             current = (char*) malloc(strlen(tk)*sizeof(char*));
             strcpy(current, tk);
@@ -165,6 +235,7 @@ void tokenizer(char* input, char** array, size_t* size, char** outfile, char** i
 char* outfile;
 char* infile;
 char* errorfile;
+
 
 void fileHelper(){
     if (outfile != NULL){
@@ -195,7 +266,7 @@ int main(int argc, char* argv[]){
     int pipeIndex = 0;
 
     signal(SIGINT, sigint_handler); 
-    //signal(SIGTSTP, sigtstp_handler);
+    signal(SIGTSTP, sigtstp_handler);
     signal(SIGTTOU, SIG_IGN);
 //    signal(SIGCHLD, sigchld_handler);
 
@@ -203,6 +274,7 @@ int main(int argc, char* argv[]){
  
     int pid = 0;
     while (1){
+        background = false;
         pipeIndex = -1;
         outfile = NULL;
         infile = NULL;
@@ -227,21 +299,42 @@ int main(int argc, char* argv[]){
         
         strcpy(instr_cpy, instr);
         if (strcmp(instr, "fg") == 0){
-            printf("%s\n", jobs->name);
-            tcsetpgrp(STDIN_FILENO, cpid);
-            kill(-cpid, SIGCONT);
-            //kill(cpid2, SIGCONT);
+            job* toFg = get_foreground(jobs);
+            printf("%s\n", toFg->name);
+            tcsetpgrp(STDIN_FILENO, toFg->group);
+            kill(- toFg->group, SIGCONT);
             int status;
-            waitpid(-cpid, &status, WUNTRACED);
-            waitpid(-cpid, &status, WUNTRACED);
+            for (int i = 0; i < toFg->processCount; i++){
+                waitpid(-cpid, &status, WUNTRACED);
+            }
             tcsetpgrp(STDIN_FILENO, getpgid(0));
             if (WIFSTOPPED(status)){
-                printf("ctrl-z\n");
+                toFg->status = STOPPED;
             }
+            printf("\n");
              //waitpid(cpid, &status, 0);
         }
         else if (strcmp(instr, "jobs") == 0){
             print_jobs(jobs);
+        }
+
+        else if (strcmp(instr, "bg") == 0){
+            maybeJob toBg = get_background(jobs);
+            if (toBg.value != NULL){
+                if (toBg.exists == true){
+                    toBg.value->status = RUNNING;
+                    kill(- toBg.value->group, SIGCONT);
+                    if (toBg.value->number == job_num){
+                        printf("[%i] + Running %s\n", (toBg.value)->number, (toBg.value)->name);
+                    }
+                    else{
+                        printf("[%i] - Running %s\n", (toBg.value)->number, (toBg.value)->name);
+                    }
+                }
+                else{
+                    printf("yash: bg: job %i already in background\n", (toBg.value)->number);
+                }
+            }
         }
         else { //do stuff
             if (strlen(instr) > 0){
@@ -290,26 +383,6 @@ int main(int argc, char* argv[]){
                                 }
                             }
                             //printf("cpg: %i -- cpid: %i -- getpgid:%i\n", getsid(cpid), cpid, getpgid(0));
-                            /*
-                            if (errori != 0){
-                                if (EACCESS(errori)){
-                                    print("eaccess\n");
-                                }
-                                else if (EINVAL(errori)){
-                                    printf("einval\n");
-                                }
-                                else if (ENOSYS(errori)){
-                                    printf("enosys\n");
-                                }
-                                else if (EPERM(errori)){
-                                    printf("eperm\n");
-                                }
-                                else if (ESRCH(errori)){
-                                    printf("esrch\n");
-                                }
-                                printf("setpgid error %i\n", errori);
-                            }
-                            */ 
                             fileHelper();
 
                             close(fd[1]);
@@ -327,27 +400,43 @@ int main(int argc, char* argv[]){
 //                        fflush(stdout);
                         setpgid(cpid, cpid);
                         setpgid(cpid2, cpid);
-                        jobs = new_job(jobs, instr_cpy, cpid);
                         tcsetpgrp(STDIN_FILENO, cpid);
-                        pid = waitpid(- jobs->session, &status, WUNTRACED | WCONTINUED);
-                        pid = waitpid(- jobs->session, &status, WUNTRACED | WCONTINUED);
+                        pid = waitpid(-cpid, &status, WUNTRACED | WCONTINUED);
+                        pid = waitpid(-cpid, &status, WUNTRACED | WCONTINUED);
                         tcsetpgrp(STDIN_FILENO, getpgid(0));
                         if (WIFSTOPPED(status)){
-                            printf("\nKilled: %s\n", jobs->name);
+                            if (jobs == NULL){
+                                jobs = new_job(jobs, instr_cpy, cpid, 2);
+                            }
+                            else{
+                                new_job(jobs, instr_cpy, cpid, 2);    
+                            }
+                            printf("\n");
                         }
                     }
                     else{
                         // PARENT
                         setpgid(cpid, cpid);
-                        tcsetpgrp(STDIN_FILENO, cpid);
-                        int status = 0;
-                        //pid = waitpid(cpid, &status, WUNTRACED | WCONTINUED);
-//                        printf("%i - %i - %i\n", getpid(), cpid, getpgid(cpid));
-                        pid = waitpid(-cpid, &status, WUNTRACED | WCONTINUED);
+                        job* newjob = new_job(jobs, instr_cpy, cpid, 1);
+                        if (jobs == NULL){
+                            jobs = newjob;
+                        }
+                        if (background == false){
+                            tcsetpgrp(STDIN_FILENO, cpid);
+                            int status = 0;
+                            //pid = waitpid(cpid, &status, WUNTRACED | WCONTINUED);
+    //                        printf("%i - %i - %i\n", getpid(), cpid, getpgid(cpid));
+                            pid = waitpid(-cpid, &status, WUNTRACED | WCONTINUED);
+                            tcsetpgrp(STDIN_FILENO, getpgid(0));
+                            if (WIFEXITED(status)){
 
-                        tcsetpgrp(STDIN_FILENO, getpgid(0));
-                        if (WIFSTOPPED(status)){
-                            printf("ctrl-z\n");
+                            }
+                            else if (WIFSTOPPED(status)){
+                            printf("\n");
+                            }
+                        }
+                        else{
+                            newjob->status == RUNNING; 
                         }
                     }
                 }
