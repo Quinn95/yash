@@ -140,6 +140,7 @@ job* remove_job(job* current, pid_t id){
         prev = current;
         current = current->next;
     }
+    job_num--;
     return head;
 }
 
@@ -271,6 +272,8 @@ int main(int argc, char* argv[]){
     int fd[2];
  
     int pid = 0;
+
+
     while (1){
         background = false;
         pipeIndex = -1;
@@ -315,6 +318,7 @@ int main(int argc, char* argv[]){
                     printf("\n");
                 } else{
                     jobs = remove_job(jobs, toFg->group);
+                    printf("\n");
                 }
             }
         }
